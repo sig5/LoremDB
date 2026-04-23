@@ -87,3 +87,27 @@ func (ssTable *SSTable) FlushMemTable(memTable *memtable.MemTable) error {
 	})
 	return nil
 }
+
+func (ssTable *SSTable) Get(key string) string {
+	seekPoint, yes := ssTable.indexFileMemory[key]
+	if !yes {
+		return ""
+	}
+
+	_, err := ssTable.dataFile.Seek(seekPoint, 0)
+
+	if err != nil {
+		return ""
+	}
+
+	reader := bufio.NewReader(ssTable.dataFile)
+
+	row, err := reader.ReadString('\n')
+	row = strings.TrimSuffix(row, "\n")
+	parts := strings.Split(row, ",")
+	isDeleted := parts[2] == "t"
+	if isDeleted {
+		return ""
+	}
+	return parts[1]
+}
