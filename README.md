@@ -1,4 +1,4 @@
-# lorem-lsm
+# LoremDB
 
 An LSM-tree key-value store built in Go from scratch.
 
