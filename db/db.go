@@ -5,6 +5,7 @@ import (
 	"lorem-lsm/memtable"
 	"lorem-lsm/sstable"
 	"lorem-lsm/wal"
+	"os"
 	"time"
 )
 
@@ -13,10 +14,12 @@ type LoremDB struct {
 	memTable    *memtable.MemTable
 	ssTables    []*sstable.SSTable
 	ssTablePath string
+	useBloom    bool
 }
 
-func NewLoremDB() *LoremDB {
+func NewLoremDB(useBloom bool) *LoremDB {
 
+	os.MkdirAll("sstable", 0755)
 	wal, _ := wal.NewWal("wal.log")
 	memTable := memtable.NewMemTable()
 	ssTables := []*sstable.SSTable{}
@@ -27,6 +30,7 @@ func NewLoremDB() *LoremDB {
 		memTable:    memTable,
 		ssTables:    ssTables,
 		ssTablePath: ssTablePath,
+		useBloom:    useBloom,
 	}
 }
 
@@ -42,7 +46,7 @@ func (db *LoremDB) Put(key string, value string) error {
 
 	if isMemTableFull {
 		path := fmt.Sprintf("%s/%d", db.ssTablePath, time.Now().UnixNano())
-		table, err := sstable.CreateSSTable(path)
+		table, err := sstable.CreateSSTable(path, db.useBloom)
 
 		if err != nil {
 			return err
@@ -67,15 +71,17 @@ func (db *LoremDB) Delete(key string) error {
 
 	if isMemTableFull {
 		path := fmt.Sprintf("%s/%d", db.ssTablePath, time.Now().UnixNano())
-		table, err := sstable.CreateSSTable(path)
+		table, err := sstable.CreateSSTable(path, db.useBloom)
 
 		if err != nil {
+
 			return err
 		}
 
 		table.FlushMemTable(db.memTable)
 		db.ssTables = append(db.ssTables, table)
 		db.memTable = memtable.NewMemTable()
+		fmt.Println("reset, new size:", db.memTable.Size())
 	}
 	return nil
 }

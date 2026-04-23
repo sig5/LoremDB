@@ -1,6 +1,8 @@
 package memtable
 
-import "github.com/google/btree"
+import (
+	"github.com/google/btree"
+)
 
 type MemTableRow struct {
 	Key       string
@@ -20,10 +22,12 @@ type MemTable struct {
 }
 
 func NewMemTable() *MemTable {
-	return &MemTable{
+	mt := &MemTable{
 		btree:   btree.New(32),
 		maxSize: 10000,
+		size:    0,
 	}
+	return mt
 
 }
 
@@ -43,7 +47,8 @@ func (table *MemTable) add(key string, value string, isDeleted bool) bool {
 	}
 	table.btree.ReplaceOrInsert(item)
 	table.size++
-	return table.size >= table.maxSize
+	result := table.size >= table.maxSize
+	return result
 
 }
 
@@ -61,4 +66,8 @@ func (table *MemTable) Iterate(fn func(row *MemTableRow)) {
 		fn(item.(*MemTableRow))
 		return true
 	})
+}
+
+func (table *MemTable) Size() int {
+	return table.size
 }
