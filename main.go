@@ -6,51 +6,45 @@ import (
 	"time"
 )
 
-func main() {
-	// store := db.NewLoremDB(true)
-
-	// store.Put("name", "sakar")
-	// store.Put("lang", "go")
-	// store.Put("project", "lsm")
-
-	// val, ok := store.Get("name")
-	// fmt.Println(val, ok) // sakar true
-
-	// store.Delete("lang")
-	// val, ok = store.Get("lang")
-	// fmt.Println(val, ok) // "" false
-
-	// val, ok = store.Get("missing")
-	// fmt.Println(val, ok) // "" false
-
-	run_benchmark(true)
-	run_benchmark(false)
+type BenchmarkResult struct {
+	useBloom   bool
+	writes     time.Duration
+	readHits   time.Duration
+	readMisses time.Duration
 }
 
-func run_benchmark(useBloom bool) {
-	fmt.Println("--- With bloom filter --- %s", useBloom)
+func main() {
+	withBloom := run_benchmark(true)
+	withoutBloom := run_benchmark(false)
 
+	for _, r := range []BenchmarkResult{withBloom, withoutBloom} {
+		fmt.Printf("--- bloom=%v ---\n", r.useBloom)
+		fmt.Printf("  writes:      %v\n", r.writes)
+		fmt.Printf("  read hits:   %v\n", r.readHits)
+		fmt.Printf("  read misses: %v\n", r.readMisses)
+	}
+}
+
+func run_benchmark(useBloom bool) BenchmarkResult {
 	store := db.NewLoremDB(useBloom)
 
-	// benchmark writes
 	start := time.Now()
 	for i := 0; i < 500001; i++ {
 		store.Put(fmt.Sprintf("key-%d", i), fmt.Sprintf("value-%d", i))
 	}
-	fmt.Printf("10k writes: %v\n", time.Since(start))
+	writes := time.Since(start)
 
-	// benchmark reads (keys that exist)
 	start = time.Now()
 	for i := 0; i < 50000; i++ {
 		store.Get(fmt.Sprintf("key-%d", i))
 	}
-	fmt.Printf("10k reads (hits): %v\n", time.Since(start))
+	readHits := time.Since(start)
 
-	// benchmark reads (keys that don't exist)
 	start = time.Now()
 	for i := 0; i < 50000; i++ {
 		store.Get(fmt.Sprintf("missing-%d", i))
 	}
-	fmt.Printf("10k reads (misses): %v\n", time.Since(start))
+	readMisses := time.Since(start)
 
+	return BenchmarkResult{useBloom, writes, readHits, readMisses}
 }
