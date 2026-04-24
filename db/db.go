@@ -7,6 +7,7 @@ import (
 	"lorem-lsm/sstable"
 	"lorem-lsm/wal"
 	"os"
+	"sync"
 	"time"
 )
 
@@ -16,10 +17,12 @@ type LoremDB struct {
 	ssTables     []*sstable.SSTable
 	ssTablePath  string
 	useBloom     bool
+	useLock      bool
 	ssTableLimit int
+	lock         sync.RWMutex
 }
 
-func NewLoremDB(useBloom bool) *LoremDB {
+func NewLoremDB(useBloom bool, supportConcurrency bool) *LoremDB {
 
 	os.MkdirAll("sstable", 0755)
 	writeAheadLog, _ := wal.NewWal("wal.log")
@@ -43,11 +46,17 @@ func NewLoremDB(useBloom bool) *LoremDB {
 		ssTablePath:  ssTablePath,
 		useBloom:     useBloom,
 		ssTableLimit: 5,
+		useLock:      supportConcurrency,
 	}
 }
 
 func (db *LoremDB) Put(key string, value string) error {
 	// write wal first to maximize data recovery chances
+	if db.useLock {
+		db.lock.Lock()
+		defer db.lock.Unlock()
+	}
+
 	db.wal.Append(wal.WalRow{
 		Key:       key,
 		Value:     value,
@@ -79,6 +88,12 @@ func (db *LoremDB) Put(key string, value string) error {
 }
 
 func (db *LoremDB) Delete(key string) error {
+
+	if db.useLock {
+		db.lock.Lock()
+		defer db.lock.Unlock()
+	}
+
 	// write wal first to maximize data recovery chances
 	db.wal.Append(wal.WalRow{
 		Key:       key,
@@ -106,6 +121,12 @@ func (db *LoremDB) Delete(key string) error {
 }
 
 func (db *LoremDB) Get(key string) (string, bool) {
+
+	if db.useLock {
+		db.lock.RLock()
+		defer db.lock.RUnlock()
+	}
+
 	// check in memtable
 	val, ok := db.memTable.Get(key)
 	if ok {
