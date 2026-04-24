@@ -77,6 +77,74 @@ Reads walk 50 SSTables. Each index fits in CPU cache so map lookups are fast and
 
 Fewer SSTables so reads are faster. Writes are slower since each flush is much larger. Index maps no longer fit in CPU cache, so bloom's compact bitset beats a plain map lookup on misses.
 
+## go test benchmarks
+
+Run on Apple M4, `-benchtime=5s`. Numbers are per-operation.
+
+### Sequential writes
+
+| Config | ns/op | B/op |
+|--------|------:|-----:|
+| bloom=true, lock=true | 58,165 | 28,180 |
+| bloom=true, lock=false | 73,167 | 36,454 |
+| bloom=false, lock=true | 70,526 | 35,228 |
+| bloom=false, lock=false | 80,792 | 39,588 |
+
+### Sequential reads — hits (10k keys pre-loaded)
+
+| Config | ns/op |
+|--------|------:|
+| bloom=true, lock=true | 5,445 |
+| bloom=true, lock=false | 5,364 |
+| bloom=false, lock=true | 5,351 |
+| bloom=false, lock=false | 5,333 |
+
+### Sequential reads — misses (10k keys pre-loaded, reading non-existent keys)
+
+| Config | ns/op |
+|--------|------:|
+| bloom=true, lock=true | 65.4 |
+| bloom=true, lock=false | 65.1 |
+| bloom=false, lock=true | 67.5 |
+| bloom=false, lock=false | 67.4 |
+
+### Reads — large dataset (100k keys, hits vs misses)
+
+| Config | ns/op |
+|--------|------:|
+| hit, bloom=true | 5,418 |
+| hit, bloom=false | 5,378 |
+| miss, bloom=true | 97.5 |
+| miss, bloom=false | 110.4 |
+
+### Concurrent writes (`b.RunParallel`, 10 goroutines)
+
+| Config | ns/op |
+|--------|------:|
+| bloom=true, lock=true | 18,639 |
+| bloom=false, lock=true | 18,889 |
+
+### Concurrent reads (`b.RunParallel`, 10 goroutines)
+
+| Config | ns/op |
+|--------|------:|
+| bloom=true, lock=true | 4,696 |
+| bloom=false, lock=true | 4,754 |
+
+### What the numbers tell us
+
+**Bloom filter only helps misses.** On a hit, the bloom filter says "maybe" and you still have to read the index — so you pay the hash cost for nothing. On a miss, bloom can reject a key outright without touching the index at all, which is where the speedup comes from.
+
+**The bloom advantage scales with index size.** With 10k keys (small SSTables, index fits in cache), bloom saves ~3% on misses (65ns vs 67ns). With 100k keys (larger indices after compaction), the saving grows to ~12% (97ns vs 110ns). The index maps are too large for CPU cache at that point, so each lookup becomes a RAM access; bloom's compact bitset stays cache-hot and wins.
+
+**Bloom never helps read hits.** The hit numbers across small and large datasets are nearly identical with and without bloom (~5.3–5.4µs). The SSTable data file read dominates, and bloom adds a small hash overhead before it.
+
+**An uncontended lock is basically free.** For sequential writes, `lock=true` is actually faster than `lock=false` (58µs vs 73µs). There's no contention so the mutex costs nothing, and the two code paths end up with different allocation patterns — `lock=false` allocates about 30% more memory per op, which is where the slowdown comes from.
+
+**Concurrent writes scale to about 3x, not 10x.** Sequential puts cost ~58µs; parallel drops to ~18µs across 10 goroutines. The ceiling is the memtable write lock — WAL appends and B-tree inserts both serialize, so adding more goroutines doesn't help past a point.
+
+**Concurrent reads barely move the needle** (~5.4µs → 4.7µs). Reads take a shared `RLock` so they can technically run in parallel, but the bottleneck is SSTable file I/O which doesn't fan out well on a single drive.
+
 ## Running
 
 ```bash
