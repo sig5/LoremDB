@@ -22,13 +22,22 @@ type LoremDB struct {
 func NewLoremDB(useBloom bool) *LoremDB {
 
 	os.MkdirAll("sstable", 0755)
-	wal, _ := wal.NewWal("wal.log")
+	writeAheadLog, _ := wal.NewWal("wal.log")
 	memTable := memtable.NewMemTable()
+
+	writeAheadLog.Recover(func(walRow *wal.WalRow) {
+		if !walRow.IsDeleted {
+			memTable.Put(walRow.Key, walRow.Value)
+		} else {
+			memTable.Delete(walRow.Key)
+		}
+	})
+
 	ssTables := []*sstable.SSTable{}
 	ssTablePath := "sstable"
 
 	return &LoremDB{
-		wal:          wal,
+		wal:          writeAheadLog,
 		memTable:     memTable,
 		ssTables:     ssTables,
 		ssTablePath:  ssTablePath,
@@ -64,6 +73,7 @@ func (db *LoremDB) Put(key string, value string) error {
 
 		}
 		db.memTable = memtable.NewMemTable()
+		db.wal.Clear()
 	}
 	return nil
 }

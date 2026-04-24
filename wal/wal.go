@@ -46,6 +46,16 @@ func (wal *Wal) Append(walRow WalRow) {
 	wal.file.WriteString(wal.lineDelimiter)
 }
 
+func (wal *Wal) Clear() error {
+
+	err := wal.file.Truncate(0)
+	if err != nil {
+		return err
+	}
+	_, err = wal.file.Seek(0, 0)
+	return err
+}
+
 func (wal *Wal) Recover(callback func(*WalRow)) error {
 	file, err := os.Open(wal.file.Name())
 
