@@ -59,6 +59,24 @@ Bloom is slower here. The index fits in cache so a plain map lookup is cheaper t
 
 Bloom wins on misses. Index maps are too big for cache, bloom's bitset isn't.
 
+**Without compaction (maxSize=10k, ~50 small SSTables)**
+
+| | Writes | Read hits | Read misses |
+|-|--------|-----------|-------------|
+| Bloom on | 4.25s | 125ms | 52ms |
+| Bloom off | 4.44s | 114ms | 34ms |
+
+Reads walk 50 SSTables. Each index fits in CPU cache so map lookups are fast and bloom adds more overhead than it saves.
+
+**With compaction (maxSize=100k, ~5 large SSTables)**
+
+| | Writes | Read hits | Read misses |
+|-|--------|-----------|-------------|
+| Bloom on | 15.4s | 62ms | 8.3ms |
+| Bloom off | 15.7s | 68ms | 9.1ms |
+
+Fewer SSTables so reads are faster. Writes are slower since each flush is much larger. Index maps no longer fit in CPU cache, so bloom's compact bitset beats a plain map lookup on misses.
+
 ## Running
 
 ```bash
