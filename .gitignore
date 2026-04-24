@@ -1,0 +1,5 @@
+*.log
+sstable/
+lorem-lsm
+lsm-go
+.DS_Store
