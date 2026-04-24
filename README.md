@@ -90,7 +90,7 @@ Run on Apple M4, `-benchtime=5s`. Numbers are per-operation.
 | bloom=false, lock=true | 70,526 | 35,228 |
 | bloom=false, lock=false | 80,792 | 39,588 |
 
-### Sequential reads — hits (10k keys pre-loaded)
+### Sequential reads, hits (10k keys pre-loaded)
 
 | Config | ns/op |
 |--------|------:|
@@ -99,7 +99,7 @@ Run on Apple M4, `-benchtime=5s`. Numbers are per-operation.
 | bloom=false, lock=true | 5,351 |
 | bloom=false, lock=false | 5,333 |
 
-### Sequential reads — misses (10k keys pre-loaded, reading non-existent keys)
+### Sequential reads, misses (10k keys pre-loaded, reading non-existent keys)
 
 | Config | ns/op |
 |--------|------:|
@@ -108,7 +108,7 @@ Run on Apple M4, `-benchtime=5s`. Numbers are per-operation.
 | bloom=false, lock=true | 67.5 |
 | bloom=false, lock=false | 67.4 |
 
-### Reads — large dataset (100k keys, hits vs misses)
+### Reads, large dataset (100k keys, hits vs misses)
 
 | Config | ns/op |
 |--------|------:|
@@ -133,17 +133,17 @@ Run on Apple M4, `-benchtime=5s`. Numbers are per-operation.
 
 ### What the numbers tell us
 
-**Bloom filter only helps misses.** On a hit, the bloom filter says "maybe" and you still have to read the index — so you pay the hash cost for nothing. On a miss, bloom can reject a key outright without touching the index at all, which is where the speedup comes from.
+**Bloom filter only helps misses.** On a hit, bloom says "maybe" and you still have to read the index, so you pay the hash cost for nothing. On a miss it can reject the key without touching the index at all, which is where the speedup comes from.
 
-**The bloom advantage scales with index size.** With 10k keys (small SSTables, index fits in cache), bloom saves ~3% on misses (65ns vs 67ns). With 100k keys (larger indices after compaction), the saving grows to ~12% (97ns vs 110ns). The index maps are too large for CPU cache at that point, so each lookup becomes a RAM access; bloom's compact bitset stays cache-hot and wins.
+**The advantage scales with index size.** With 10k keys the SSTable index maps fit in CPU cache, so a plain map lookup beats running 3 hashes and bloom only saves about 3% on misses (65ns vs 67ns). With 100k keys the indices spill out of cache and each lookup costs a RAM round-trip. At that point bloom's compact bitset stays cache-hot and the saving grows to about 12% (97ns vs 110ns).
 
-**Bloom never helps read hits.** The hit numbers across small and large datasets are nearly identical with and without bloom (~5.3–5.4µs). The SSTable data file read dominates, and bloom adds a small hash overhead before it.
+**Bloom never helps hits.** Hit latency is nearly identical with and without bloom across both dataset sizes (~5.3-5.4µs). The SSTable data file read dominates and bloom just adds a small hash overhead before it.
 
-**An uncontended lock is basically free.** For sequential writes, `lock=true` is actually faster than `lock=false` (58µs vs 73µs). There's no contention so the mutex costs nothing, and the two code paths end up with different allocation patterns — `lock=false` allocates about 30% more memory per op, which is where the slowdown comes from.
+**An uncontended lock is basically free.** Sequential writes with `lock=true` are actually faster than `lock=false` (58µs vs 73µs). There's no contention so the mutex costs nothing, and the two code paths end up with different allocation patterns. `lock=false` allocates about 30% more per op, which is where the difference comes from.
 
-**Concurrent writes scale to about 3x, not 10x.** Sequential puts cost ~58µs; parallel drops to ~18µs across 10 goroutines. The ceiling is the memtable write lock — WAL appends and B-tree inserts both serialize, so adding more goroutines doesn't help past a point.
+**Concurrent writes scale to about 3x, not 10x.** Sequential puts cost ~58µs; parallel drops to ~18µs across 10 goroutines. WAL appends and B-tree inserts both serialize on the write lock, so more goroutines can't help past that point.
 
-**Concurrent reads barely move the needle** (~5.4µs → 4.7µs). Reads take a shared `RLock` so they can technically run in parallel, but the bottleneck is SSTable file I/O which doesn't fan out well on a single drive.
+**Concurrent reads barely move.** ~5.4µs drops to ~4.7µs. Reads take a shared `RLock` so they can run in parallel, but the bottleneck is SSTable file I/O which doesn't fan out well on a single drive.
 
 ## Running
 
