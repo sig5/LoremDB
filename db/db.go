@@ -2,6 +2,7 @@ package db
 
 import (
 	"fmt"
+	compaction "lorem-lsm/compactor"
 	"lorem-lsm/memtable"
 	"lorem-lsm/sstable"
 	"lorem-lsm/wal"
@@ -10,11 +11,12 @@ import (
 )
 
 type LoremDB struct {
-	wal         *wal.Wal
-	memTable    *memtable.MemTable
-	ssTables    []*sstable.SSTable
-	ssTablePath string
-	useBloom    bool
+	wal          *wal.Wal
+	memTable     *memtable.MemTable
+	ssTables     []*sstable.SSTable
+	ssTablePath  string
+	useBloom     bool
+	ssTableLimit int
 }
 
 func NewLoremDB(useBloom bool) *LoremDB {
@@ -26,11 +28,12 @@ func NewLoremDB(useBloom bool) *LoremDB {
 	ssTablePath := "sstable"
 
 	return &LoremDB{
-		wal:         wal,
-		memTable:    memTable,
-		ssTables:    ssTables,
-		ssTablePath: ssTablePath,
-		useBloom:    useBloom,
+		wal:          wal,
+		memTable:     memTable,
+		ssTables:     ssTables,
+		ssTablePath:  ssTablePath,
+		useBloom:     useBloom,
+		ssTableLimit: 5,
 	}
 }
 
@@ -54,6 +57,12 @@ func (db *LoremDB) Put(key string, value string) error {
 
 		table.FlushMemTable(db.memTable)
 		db.ssTables = append(db.ssTables, table)
+
+		if len(db.ssTables) > db.ssTableLimit {
+			compactor := compaction.NewCompactor(db.ssTables)
+			db.ssTables = []*sstable.SSTable{compactor.Compact()}
+
+		}
 		db.memTable = memtable.NewMemTable()
 	}
 	return nil
@@ -94,7 +103,7 @@ func (db *LoremDB) Get(key string) (string, bool) {
 	}
 	// fallback to sstable
 	for i := len(db.ssTables) - 1; i >= 0; i-- {
-		value := db.ssTables[i].Get(key)
+		value, _ := db.ssTables[i].Get(key)
 
 		if value != "" {
 			return value, true

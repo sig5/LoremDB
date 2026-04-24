@@ -13,9 +13,18 @@ import (
 type SSTable struct {
 	indexFile       *os.File
 	dataFile        *os.File
-	indexFileMemory map[string]int64
+	IndexFileMemory map[string]int64
 	bloomFilter     *bloom.BloomFilter
 	useBloom        bool
+	BasePath        string
+}
+
+func (table *SSTable) Close() {
+
+	table.indexFile.Close()
+	table.dataFile.Close()
+	os.RemoveAll(table.BasePath)
+	println("Cleaned")
 }
 
 func CreateSSTable(basePath string, useBloom bool) (*SSTable, error) {
@@ -40,9 +49,10 @@ func CreateSSTable(basePath string, useBloom bool) (*SSTable, error) {
 	return &SSTable{
 		indexFile:       idxFile,
 		dataFile:        dFile,
-		indexFileMemory: indexFileMemory,
+		IndexFileMemory: indexFileMemory,
 		bloomFilter:     bloom.NewBloomFilter(1000000, 3),
 		useBloom:        useBloom,
+		BasePath:        basePath,
 	}, nil
 }
 
@@ -74,7 +84,7 @@ func ReadSSTable(basePath string) (*SSTable, error) {
 	return &SSTable{
 		indexFile:       idxFile,
 		dataFile:        dFile,
-		indexFileMemory: indexFileMemory,
+		IndexFileMemory: indexFileMemory,
 		bloomFilter:     bloom.NewBloomFilter(1000000, 3),
 	}, nil
 }
@@ -93,7 +103,7 @@ func (ssTable *SSTable) FlushMemTable(memTable *memtable.MemTable) error {
 		if err != nil {
 			fmt.Println("write error:", err)
 		}
-		ssTable.indexFileMemory[row.Key] = start
+		ssTable.IndexFileMemory[row.Key] = start
 		idxItem := fmt.Sprintf("%s,%d\n", row.Key, start)
 		start += int64(len(item))
 		ssTable.indexFile.WriteString(idxItem)
@@ -102,19 +112,19 @@ func (ssTable *SSTable) FlushMemTable(memTable *memtable.MemTable) error {
 	return nil
 }
 
-func (ssTable *SSTable) Get(key string) string {
+func (ssTable *SSTable) Get(key string) (string, bool) {
 	if ssTable.useBloom && !ssTable.bloomFilter.Contains(key) {
-		return ""
+		return "", false
 	}
-	seekPoint, yes := ssTable.indexFileMemory[key]
+	seekPoint, yes := ssTable.IndexFileMemory[key]
 	if !yes {
-		return ""
+		return "", false
 	}
 
 	_, err := ssTable.dataFile.Seek(seekPoint, 0)
 
 	if err != nil {
-		return ""
+		return "", false
 	}
 
 	reader := bufio.NewReader(ssTable.dataFile)
@@ -124,7 +134,7 @@ func (ssTable *SSTable) Get(key string) string {
 	parts := strings.Split(row, ",")
 	isDeleted := parts[2] == "t"
 	if isDeleted {
-		return ""
+		return "", true
 	}
-	return parts[1]
+	return parts[1], false
 }
