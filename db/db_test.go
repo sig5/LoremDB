@@ -11,12 +11,12 @@ func TestCrashRecovery(t *testing.T) {
 	os.MkdirAll("sstable", 0755)
 
 	// write some keys
-	store := NewLoremDB(true)
+	store := NewLoremDB(true, true)
 	store.Put("name", "sakar")
 	store.Put("lang", "go")
 
 	// simulate crash — don't flush, just create a new instance
-	store2 := NewLoremDB(true)
+	store2 := NewLoremDB(true, true)
 
 	val, ok := store2.Get("name")
 	if !ok || val != "sakar" {

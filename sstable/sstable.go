@@ -24,7 +24,6 @@ func (table *SSTable) Close() {
 	table.indexFile.Close()
 	table.dataFile.Close()
 	os.RemoveAll(table.BasePath)
-	println("Cleaned")
 }
 
 func CreateSSTable(basePath string, useBloom bool) (*SSTable, error) {
@@ -120,14 +119,17 @@ func (ssTable *SSTable) Get(key string) (string, bool) {
 	if !yes {
 		return "", false
 	}
+	handle, err := os.Open(ssTable.dataFile.Name())
 
-	_, err := ssTable.dataFile.Seek(seekPoint, 0)
+	defer handle.Close()
 
-	if err != nil {
+	_, err1 := handle.Seek(seekPoint, 0)
+
+	if err1 != nil || err != nil {
 		return "", false
 	}
 
-	reader := bufio.NewReader(ssTable.dataFile)
+	reader := bufio.NewReader(handle)
 
 	row, err := reader.ReadString('\n')
 	row = strings.TrimSuffix(row, "\n")
