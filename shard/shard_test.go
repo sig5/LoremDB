@@ -11,12 +11,12 @@ func TestCrashRecovery(t *testing.T) {
 	os.MkdirAll("sstable", 0755)
 
 	// write some keys
-	store := NewLoremDBShard(true, true)
+	store := NewLoremDBShard(1, true, true)
 	store.Put("name", "sakar")
 	store.Put("lang", "go")
 
 	// simulate crash — don't flush, just create a new instance
-	store2 := NewLoremDBShard(true, true)
+	store2 := NewLoremDBShard(1, true, true)
 
 	val, ok := store2.Get("name")
 	if !ok || val != "sakar" {
