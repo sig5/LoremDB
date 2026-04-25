@@ -145,6 +145,62 @@ Run on Apple M4, `-benchtime=5s`. Numbers are per-operation.
 
 **Concurrent reads barely move.** ~5.4µs drops to ~4.7µs. Reads take a shared `RLock` so they can run in parallel, but the bottleneck is SSTable file I/O which doesn't fan out well on a single drive.
 
+## Sharding
+
+A single-shard LSM is a single lock. Every write and read globally serializes on one `sync.RWMutex`. Under concurrency that's a bottleneck — goroutines queue up waiting for the lock even when they'd be operating on completely different keys.
+
+Sharding splits the database into N independent shards, each with its own memtable, SSTable list, WAL, and lock. A key goes to exactly one shard, determined by a hash. Goroutines hitting different shards never contend.
+
+```
+Key → Hash → Shard ID → LoremDBShard (own lock, WAL, memtable, SSTables)
+```
+
+### How the hash works
+
+```go
+func (db *LoremDB) GetShardId(key *string) int {
+    sum := 0
+    for i := 0; i < min(len(*key), 5); i++ {
+        sum += int((*key)[i] - 'a')
+    }
+    return sum % db.shardCount
+}
+```
+
+Sum the ASCII offset from `'a'` for the first 5 characters, mod shard count.
+
+### Lazy initialization
+
+Shards aren't created at startup. The first key that hashes to a shard ID triggers creation. Double-checked locking makes this safe under concurrency: check without lock, lock, check again, create if still nil.
+
+### Benchmarks
+
+Run on Apple M4, `-benchtime=5s`, 10 goroutines (`b.RunParallel`).
+
+#### Concurrent Gets
+
+| Config | ns/op | vs. 1 shard |
+|--------|------:|------------:|
+| bloom=true, shardCount=1 | 1,577 | baseline |
+| bloom=false, shardCount=1 | 1,530 | baseline |
+| bloom=true, shardCount=5 | 812 | **1.9× faster** |
+| bloom=false, shardCount=5 | 676 | **2.3× faster** |
+
+#### Concurrent Puts
+
+| Config | ns/op | vs. 1 shard |
+|--------|------:|------------:|
+| bloom=true, shardCount=1 | 11,365 | baseline |
+| bloom=false, shardCount=1 | 12,344 | baseline |
+| bloom=true, shardCount=2 | 9,003 | **1.3× faster** |
+| bloom=false, shardCount=2 | 10,700 | **1.2× faster** |
+
+### What the numbers tell us
+
+**Reads benefit more than writes.** Gets at 5 shards are ~2× faster; Puts at 2 shards are ~1.3× faster. Reads take a shared `RLock` so multiple goroutines on the same shard proceed in parallel. Writes take an exclusive lock and append to the WAL, which is sequential per shard.
+
+**At shardCount=5, bloom=false beats bloom=true on Gets (676 vs 812 ns/op).** This is the same pattern seen in the single-shard small-SSTable benchmarks — fewer keys per shard means smaller index maps and cheaper plain lookups than running bloom hashes.
+
 ## Running
 
 ```bash
