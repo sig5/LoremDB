@@ -1,144 +1,67 @@
 package db
 
 import (
-	"fmt"
-	compaction "lorem-lsm/compactor"
-	"lorem-lsm/memtable"
-	"lorem-lsm/sstable"
-	"lorem-lsm/wal"
-	"os"
+	"lorem-lsm/shard"
 	"sync"
-	"time"
 )
 
 type LoremDB struct {
-	wal          *wal.Wal
-	memTable     *memtable.MemTable
-	ssTables     []*sstable.SSTable
-	ssTablePath  string
-	useBloom     bool
-	useLock      bool
-	ssTableLimit int
-	lock         sync.RWMutex
+	shardCount         int
+	dbList             []*shard.LoremDBShard
+	supportConcurrency bool
+	useBloom           bool
+	lock               sync.Mutex
 }
 
-func NewLoremDB(useBloom bool, supportConcurrency bool) *LoremDB {
-
-	os.MkdirAll("sstable", 0755)
-	writeAheadLog, _ := wal.NewWal("wal.log")
-	memTable := memtable.NewMemTable()
-
-	writeAheadLog.Recover(func(walRow *wal.WalRow) {
-		if !walRow.IsDeleted {
-			memTable.Put(walRow.Key, walRow.Value)
-		} else {
-			memTable.Delete(walRow.Key)
-		}
-	})
-
-	ssTables := []*sstable.SSTable{}
-	ssTablePath := "sstable"
+func NewLoremDB(shardCount int, useBloom bool, supportConcurrency bool) *LoremDB {
 
 	return &LoremDB{
-		wal:          writeAheadLog,
-		memTable:     memTable,
-		ssTables:     ssTables,
-		ssTablePath:  ssTablePath,
-		useBloom:     useBloom,
-		ssTableLimit: 5,
-		useLock:      supportConcurrency,
+		shardCount:         shardCount,
+		dbList:             make([]*shard.LoremDBShard, shardCount),
+		useBloom:           useBloom,
+		supportConcurrency: supportConcurrency,
 	}
 }
 
 func (db *LoremDB) Put(key string, value string) error {
-	// write wal first to maximize data recovery chances
-	if db.useLock {
-		db.lock.Lock()
-		defer db.lock.Unlock()
-	}
-
-	db.wal.Append(wal.WalRow{
-		Key:       key,
-		Value:     value,
-		IsDeleted: false,
-	})
-
-	isMemTableFull := db.memTable.Put(key, value)
-
-	if isMemTableFull {
-		path := fmt.Sprintf("%s/%d", db.ssTablePath, time.Now().UnixNano())
-		table, err := sstable.CreateSSTable(path, db.useBloom)
-
-		if err != nil {
-			return err
-		}
-
-		table.FlushMemTable(db.memTable)
-		db.ssTables = append(db.ssTables, table)
-
-		if len(db.ssTables) > db.ssTableLimit {
-			compactor := compaction.NewCompactor(db.ssTables)
-			db.ssTables = []*sstable.SSTable{compactor.Compact()}
-
-		}
-		db.memTable = memtable.NewMemTable()
-		db.wal.Clear()
-	}
-	return nil
-}
-
-func (db *LoremDB) Delete(key string) error {
-
-	if db.useLock {
-		db.lock.Lock()
-		defer db.lock.Unlock()
-	}
-
-	// write wal first to maximize data recovery chances
-	db.wal.Append(wal.WalRow{
-		Key:       key,
-		Value:     "",
-		IsDeleted: true,
-	})
-
-	isMemTableFull := db.memTable.Delete(key)
-
-	if isMemTableFull {
-		path := fmt.Sprintf("%s/%d", db.ssTablePath, time.Now().UnixNano())
-		table, err := sstable.CreateSSTable(path, db.useBloom)
-
-		if err != nil {
-
-			return err
-		}
-
-		table.FlushMemTable(db.memTable)
-		db.ssTables = append(db.ssTables, table)
-		db.memTable = memtable.NewMemTable()
-		fmt.Println("reset, new size:", db.memTable.Size())
-	}
-	return nil
+	shard := db.GetShard(&key)
+	return shard.Put(key, value)
 }
 
 func (db *LoremDB) Get(key string) (string, bool) {
+	shard := db.GetShard(&key)
+	return shard.Get(key)
+}
 
-	if db.useLock {
-		db.lock.RLock()
-		defer db.lock.RUnlock()
-	}
+func (db *LoremDB) Delete(key string) error {
+	shard := db.GetShard(&key)
+	return shard.Delete(key)
+}
 
-	// check in memtable
-	val, ok := db.memTable.Get(key)
-	if ok {
-		return val, true
-	}
-	// fallback to sstable
-	for i := len(db.ssTables) - 1; i >= 0; i-- {
-		value, _ := db.ssTables[i].Get(key)
-
-		if value != "" {
-			return value, true
+func (db *LoremDB) GetShard(key *string) *shard.LoremDBShard {
+	id := db.GetShardId(key)
+	selectedShard := db.dbList[id]
+	if selectedShard == nil {
+		// lazy loadingl
+		db.lock.Lock()
+		defer db.lock.Unlock()
+		selectedShard = db.dbList[id]
+		if selectedShard == nil {
+			selectedShard = shard.NewLoremDBShard(id, db.useBloom, db.supportConcurrency)
+			db.dbList[id] = selectedShard
 		}
 	}
-	return "", false
+	return selectedShard
+}
+
+func (db *LoremDB) GetShardId(key *string) int {
+
+	// get value of first 5 characters.
+	sum := 0
+
+	for i := 0; i < min(len(*key), 5); i++ {
+		sum += int((*key)[i] - 'a')
+	}
+	shardHash := sum % (db.shardCount)
+	return shardHash
 }
