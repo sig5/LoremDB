@@ -26,7 +26,7 @@ func main() {
 }
 
 func run_benchmark(useBloom bool) BenchmarkResult {
-	store := db.NewLoremDB(useBloom, true)
+	store := db.NewLoremDB(1, useBloom, true)
 
 	start := time.Now()
 	for i := 0; i < 500001; i++ {

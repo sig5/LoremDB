@@ -6,27 +6,30 @@ import (
 	"testing"
 )
 
-func setupDB(b *testing.B, useBloom bool, useLock bool) *LoremDB {
+func setupDB(b *testing.B, shardCount int, useBloom bool, useLock bool) *LoremDB {
 	os.RemoveAll("sstable")
 	os.Remove("wal.log")
 	os.MkdirAll("sstable", 0755)
-	return NewLoremDB(useBloom, useLock)
+	return NewLoremDB(shardCount, useBloom, useLock)
 }
 
 func BenchmarkPut(b *testing.B) {
 	configs := []struct {
-		useBloom bool
-		useLock  bool
+		useBloom   bool
+		useLock    bool
+		shardCount int
 	}{
-		{true, true},
-		{true, false},
-		{false, true},
-		{false, false},
+		{true, true, 1},
+		{true, true, 2},
+		{true, false, 1},
+		{false, true, 1},
+		{false, true, 2},
+		{false, false, 1},
 	}
 	for _, cfg := range configs {
-		name := fmt.Sprintf("bloom=%v,lock=%v", cfg.useBloom, cfg.useLock)
+		name := fmt.Sprintf("bloom=%v,lock=%v,shardCount=%d", cfg.useBloom, cfg.useLock, cfg.shardCount)
 		b.Run(name, func(b *testing.B) {
-			store := setupDB(b, cfg.useBloom, cfg.useLock)
+			store := setupDB(b, cfg.shardCount, cfg.useBloom, cfg.useLock)
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				store.Put(fmt.Sprintf("key-%d", i), fmt.Sprintf("value-%d", i))
@@ -37,18 +40,21 @@ func BenchmarkPut(b *testing.B) {
 
 func BenchmarkGet(b *testing.B) {
 	configs := []struct {
-		useBloom bool
-		useLock  bool
+		useBloom   bool
+		useLock    bool
+		shardCount int
 	}{
-		{true, true},
-		{true, false},
-		{false, true},
-		{false, false},
+		{true, true, 1},
+		{true, true, 2},
+		{true, false, 1},
+		{false, true, 1},
+		{false, true, 2},
+		{false, false, 1},
 	}
 	for _, cfg := range configs {
-		name := fmt.Sprintf("bloom=%v,lock=%v", cfg.useBloom, cfg.useLock)
+		name := fmt.Sprintf("bloom=%v,lock=%v,shardCount=%d", cfg.useBloom, cfg.useLock, cfg.shardCount)
 		b.Run(name, func(b *testing.B) {
-			store := setupDB(b, cfg.useBloom, cfg.useLock)
+			store := setupDB(b, cfg.shardCount, cfg.useBloom, cfg.useLock)
 			for i := 0; i < 10000; i++ {
 				store.Put(fmt.Sprintf("key-%d", i), fmt.Sprintf("value-%d", i))
 			}
@@ -64,18 +70,21 @@ func BenchmarkGet(b *testing.B) {
 // every SSTable lookup (no index access needed), so the gap vs no-bloom is largest here.
 func BenchmarkGetMiss(b *testing.B) {
 	configs := []struct {
-		useBloom bool
-		useLock  bool
+		useBloom   bool
+		useLock    bool
+		shardCount int
 	}{
-		{true, true},
-		{true, false},
-		{false, true},
-		{false, false},
+		{true, true, 1},
+		{true, true, 2},
+		{true, false, 1},
+		{false, true, 1},
+		{false, true, 2},
+		{false, false, 1},
 	}
 	for _, cfg := range configs {
-		name := fmt.Sprintf("bloom=%v,lock=%v", cfg.useBloom, cfg.useLock)
+		name := fmt.Sprintf("bloom=%v,lock=%v,shardCount=%d", cfg.useBloom, cfg.useLock, cfg.shardCount)
 		b.Run(name, func(b *testing.B) {
-			store := setupDB(b, cfg.useBloom, cfg.useLock)
+			store := setupDB(b, cfg.shardCount, cfg.useBloom, cfg.useLock)
 			for i := 0; i < 10000; i++ {
 				store.Put(fmt.Sprintf("key-%d", i), fmt.Sprintf("value-%d", i))
 			}
@@ -107,7 +116,7 @@ func BenchmarkGetLargeDataset(b *testing.B) {
 			hit, useBloom := hit, useBloom
 			label := fmt.Sprintf("hit=%v,bloom=%v", hit, useBloom)
 			b.Run(label, func(b *testing.B) {
-				store := setupDB(b, useBloom, false)
+				store := setupDB(b, 1, useBloom, false)
 				for i := 0; i < preload; i++ {
 					store.Put(fmt.Sprintf("key-%d", i), fmt.Sprintf("value-%d", i))
 				}
@@ -126,16 +135,19 @@ func BenchmarkGetLargeDataset(b *testing.B) {
 
 func BenchmarkPutConcurrent(b *testing.B) {
 	configs := []struct {
-		useBloom bool
-		useLock  bool
+		useBloom   bool
+		useLock    bool
+		shardCount int
 	}{
-		{true, true},
-		{false, true},
+		{true, true, 1},
+		{false, true, 1},
+		{true, true, 2},
+		{false, true, 2},
 	}
 	for _, cfg := range configs {
-		name := fmt.Sprintf("bloom=%v,lock=%v", cfg.useBloom, cfg.useLock)
+		name := fmt.Sprintf("bloom=%v,lock=%v,shardCount=%d", cfg.useBloom, cfg.useLock, cfg.shardCount)
 		b.Run(name, func(b *testing.B) {
-			store := setupDB(b, cfg.useBloom, cfg.useLock)
+			store := setupDB(b, cfg.shardCount, cfg.useBloom, cfg.useLock)
 			b.ResetTimer()
 			b.RunParallel(func(pb *testing.PB) {
 				i := 0
@@ -150,16 +162,19 @@ func BenchmarkPutConcurrent(b *testing.B) {
 
 func BenchmarkGetConcurrent(b *testing.B) {
 	configs := []struct {
-		useBloom bool
-		useLock  bool
+		useBloom   bool
+		useLock    bool
+		shardCount int
 	}{
-		{true, true},
-		{false, true},
+		{true, true, 1},
+		{false, true, 1},
+		{true, true, 5},
+		{false, true, 5},
 	}
 	for _, cfg := range configs {
-		name := fmt.Sprintf("bloom=%v,lock=%v", cfg.useBloom, cfg.useLock)
+		name := fmt.Sprintf("bloom=%v,lock=%v,shardCount=%d", cfg.useBloom, cfg.useLock, cfg.shardCount)
 		b.Run(name, func(b *testing.B) {
-			store := setupDB(b, cfg.useBloom, cfg.useLock)
+			store := setupDB(b, cfg.shardCount, cfg.useBloom, cfg.useLock)
 			for i := 0; i < 10000; i++ {
 				store.Put(fmt.Sprintf("key-%d", i), fmt.Sprintf("value-%d", i))
 			}
